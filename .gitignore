@@ -1,12 +1,17 @@
-# 비밀 정보 (절대 커밋 금지 — CLAUDE.md 규칙)
+# 비밀 정보 (절대 커밋 금지 — CLAUDE.md 규칙). .env.example 은 템플릿이라 커밋함
 .env
+.env.local
 
 # 파이썬
 __pycache__/
 *.pyc
 
-# 발표 자료(바이너리)
-*.pptx
-
 # Vercel
 .vercel
+
+# 발표 자료·개인/대용량 미디어(저장소에는 올리지 않음)
+*.pptx
+*_발표*.html
+*.m4a
+*.wav
+내 목소리*
