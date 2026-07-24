@@ -1,0 +1,209 @@
+<!doctype html>
+<!-- 단어 찾기 도우미 - 기능1 후보 찾기 (작업 5) + 음성 입력(작업3) + 3화면(작업2) -->
+<!-- 설명(음성/타이핑) → 중계 서버 → 후보 3~5개 카드 → 카드 클릭 시 뜻·예문·유의어 상세. -->
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>단어 찾기 도우미</title>
+<style>
+  body { margin: 0; font-family: "Segoe UI", "맑은 고딕", "Malgun Gothic", sans-serif; background: #f0f7ff; color: #0b3d91;
+         min-height: 100vh; padding: 24px; box-sizing: border-box; }
+  .screen { display: none; flex-direction: column; align-items: center; }
+  .screen.active { display: flex; }
+  h1 { font-size: 24px; margin: 8px 0 20px; text-align: center; }
+  .desc { width: 100%; max-width: 420px; min-height: 56px; padding: 12px 14px; font-size: 16px;
+          border: 1px solid #b6d0f5; border-radius: 8px; background: #fff; text-align: center; color: #33507a; box-sizing: border-box; }
+  .desc:empty::before { content: attr(data-placeholder); color: #9db4d6; }
+  .mic { width: 120px; height: 120px; border-radius: 50%; background: #1565ff; color: #fff; border: none;
+         font-size: 18px; line-height: 1.4; margin: 28px 0 10px; cursor: pointer; }
+  .mic.listening { background: #e5484d; }
+  .btn { padding: 12px 20px; font-size: 16px; border: 1px solid #1565ff; color: #1565ff; background: #fff; border-radius: 8px; cursor: pointer; }
+  .btn.primary { background: #1565ff; color: #fff; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .status { margin-top: 16px; color: #5a76a8; font-size: 14px; min-height: 20px; text-align: center; }
+  .status.error { color: #b3261e; }
+  .note { font-size: 13px; color: #8a9ab5; margin-top: 24px; text-align: center; max-width: 420px; }
+  .topbar { width: 100%; max-width: 420px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .back { background: none; border: none; color: #1565ff; font-size: 16px; cursor: pointer; padding: 4px 0; }
+  .card { width: 100%; max-width: 420px; background: #fff; border: 1px solid #dbe8fb; border-radius: 10px;
+          padding: 14px 16px; margin-bottom: 12px; text-align: left; cursor: pointer; }
+  .card .word { font-size: 18px; font-weight: bold; }
+  .card .badge { font-size: 12px; color: #1565ff; border: 1px solid #b6d0f5; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+  .card .badge.uncertain { color: #b3261e; border-color: #eebcbc; }
+  .card .mean { color: #33507a; margin-top: 4px; font-size: 14px; }
+  .detail { width: 100%; max-width: 420px; text-align: left; }
+  .detail h2 { font-size: 22px; margin: 4px 0 12px; }
+  .detail p { margin: 6px 0; color: #33507a; }
+</style>
+
+<!-- 화면 1: 메인(음성/타이핑 입력 → 후보 찾기) -->
+<section id="screen-main" class="screen active">
+  <h1>단어 찾기 도우미</h1>
+  <div class="desc" id="desc" contenteditable="true" role="textbox" aria-label="설명 입력"
+       data-placeholder="마이크를 누르고 설명하거나, 여기에 직접 입력하세요"></div>
+  <p style="font-size:12px; color:#8a9ab5; margin:8px 0 0; text-align:center; max-width:420px;">
+    안내: 음성은 인식을 위해 외부 서비스로 전송될 수 있어요. 민감한 개인정보는 말하지 마세요.</p>
+  <button type="button" class="mic" id="micBtn">🎤<br>마이크</button>
+  <button type="button" class="btn primary" id="findBtn" style="font-size:18px; padding:15px 32px;">단어 찾기</button>
+  <div class="status" id="status">상태: 대기 중</div>
+  <p class="note">설명을 말하거나 입력한 뒤 [단어 찾기]를 누르면 후보가 나오고, 후보를 누르면 뜻·예문·유의어를 볼 수 있어요.</p>
+</section>
+
+<!-- 화면 2: 후보 목록 (동적 렌더) -->
+<section id="screen-list" class="screen">
+  <div class="topbar"><button class="back" onclick="show('screen-main')">‹ 뒤로</button><strong>후보 단어</strong></div>
+  <div id="candidates" style="width:100%;max-width:420px;"></div>
+  <div class="status" id="listStatus"></div>
+  <!-- 다시 찾기 흐름(작업 7): 찾는 단어가 없으면 설명을 보태 재검색 (설명은 유지됨) -->
+  <button type="button" class="btn" style="margin-top:8px;" onclick="show('screen-main')">← 설명 보태서 다시 찾기</button>
+  <p class="note">찾는 단어가 후보에 없나요? 설명을 더 자세히 보태 다시 찾아보세요.</p>
+</section>
+
+<!-- 화면 3: 상세 (뜻·예문·유의어는 다음 작업) -->
+<section id="screen-detail" class="screen">
+  <div class="topbar"><button class="back" onclick="show('screen-list')">‹ 뒤로</button><strong>상세</strong></div>
+  <div class="detail">
+    <h2 id="detailWord">단어</h2>
+    <div class="status" id="detailStatus"></div>
+    <p id="detailMean"></p>
+    <div id="detailExamples"></div>
+    <div id="detailSynonyms"></div>
+  </div>
+</section>
+
+<script>
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
+    document.getElementById(id).classList.add('active');
+    window.scrollTo(0, 0);
+  }
+
+  var micBtn = document.getElementById('micBtn');
+  var findBtn = document.getElementById('findBtn');
+  var descEl = document.getElementById('desc');
+  var statusEl = document.getElementById('status');
+  var candidatesEl = document.getElementById('candidates');
+  function setStatus(msg, isError) { statusEl.textContent = '상태: ' + msg; statusEl.className = 'status' + (isError ? ' error' : ''); }
+
+  // ── 음성 입력 (작업 3) ──
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recognition = null, listening = false;
+  if (!SR) {
+    setStatus('이 브라우저는 음성 인식을 지원하지 않아요. 위 칸에 직접 입력하세요.', false);
+    micBtn.disabled = true; micBtn.style.opacity = '0.5';
+  } else {
+    recognition = new SR(); recognition.lang = 'ko-KR'; recognition.interimResults = false; recognition.maxAlternatives = 1;
+    micBtn.addEventListener('click', function () {
+      if (listening) { recognition.stop(); return; }
+      try { recognition.start(); } catch (e) {}
+    });
+    recognition.onstart = function () { listening = true; micBtn.classList.add('listening'); setStatus('듣는 중…', false); };
+    recognition.onresult = function (event) { descEl.textContent = event.results[0][0].transcript; setStatus('인식 완료 — [단어 찾기]를 누르세요', false); };
+    recognition.onerror = function (event) {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') setStatus('마이크 권한을 허용해주세요. 또는 직접 입력하세요.', true);
+      else if (event.error === 'audio-capture') setStatus('마이크를 찾을 수 없어요. 마이크 연결을 확인하거나 직접 입력하세요.', true);
+      else if (event.error === 'no-speech') setStatus('말소리를 못 들었어요. 다시 한 번 말씀해주세요.', true);
+      else setStatus('음성 인식에 실패했어요. 다시 시도하거나 직접 입력하세요.', true);
+    };
+    recognition.onend = function () { listening = false; micBtn.classList.remove('listening'); if (statusEl.textContent === '상태: 듣는 중…') setStatus('대기 중', false); };
+  }
+
+  // ── 후보 찾기 (작업 5) ──
+  findBtn.addEventListener('click', runFind);
+  // UX 개선: 설명창에서 Enter 키로 바로 찾기(줄바꿈 대신 검색). Shift+Enter는 줄바꿈 유지.
+  descEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runFind(); }
+  });
+  // 제한 시간(25초)이 있는 fetch: 응답이 안 오면 요청을 끊는다.
+  // — 연속 사용 중 요청 하나가 멈추면 [단어 찾기] 버튼이 영영 잠기던 문제 방지
+  function fetchWithTimeout(url, options, ms) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, ms || 25000);
+    options = options || {};
+    options.signal = ctrl.signal;
+    return fetch(url, options).finally(function () { clearTimeout(timer); });
+  }
+
+  async function runFind() {
+    var desc = (descEl.textContent || '').trim();
+    if (!desc) { setStatus('조금 더 자세히 설명해주세요.', true); return; }
+    // 설명이 너무 짧으면 AI 호출 전에 되묻는다(짧/모호 처리)
+    if (desc.replace(/\s/g, '').length < 4) { setStatus('설명이 너무 짧아요. 조금 더 자세히 설명해주세요.', true); return; }
+    findBtn.disabled = true;
+    setStatus('단어 찾는 중…', false);
+    var t0 = Date.now();  // 5초 기준 계측 시작
+    try {
+      // 웹검색을 포함하므로 넉넉히 60초 대기(서버 AI 상한 45초가 먼저 끝나 안내됨)
+      var res = await fetchWithTimeout('/api/word', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: desc }),
+      }, 60000);
+      var data = await res.json();
+      if (!res.ok) { setStatus('오류: ' + (data.reason || ('HTTP ' + res.status)), true); return; }
+      setStatus('대기 중', false);
+      renderCandidates(data.candidates || []);
+      var ls = document.getElementById('listStatus');
+      if ((data.candidates || []).length) {
+        var sec = ((Date.now() - t0) / 1000).toFixed(1);
+        var parts = [];
+        if (data.note) parts.push(data.note);           // 문장·개념일 때 목적 안내
+        parts.push(sec + '초 만에 찾음 (웹검색 포함)');  // 웹검색 추가로 5초 기준은 완화됨
+        ls.textContent = parts.join(' · ');
+      } else if (data.note) {
+        ls.textContent = data.note;
+      }
+      show('screen-list');
+    } catch (e) {
+      if (e.name === 'AbortError') setStatus('응답이 너무 늦어요. 잠시 후 [단어 찾기]를 다시 눌러주세요.', true);
+      else setStatus('인터넷 연결이 필요합니다. (' + e.message + ')', true);
+    } finally {
+      findBtn.disabled = false;
+    }
+  }
+
+  function renderCandidates(list) {
+    candidatesEl.innerHTML = '';
+    document.getElementById('listStatus').textContent = '';
+    if (!list.length) { document.getElementById('listStatus').textContent = '후보를 찾지 못했어요. 설명을 조금 더 보태 다시 찾아보세요.'; return; }
+    list.forEach(function (c) {
+      var card = document.createElement('div'); card.className = 'card';
+      var w = document.createElement('span'); w.className = 'word'; w.textContent = c.word || ''; card.appendChild(w);
+      if (c.lang) { var lb = document.createElement('span'); lb.className = 'badge'; lb.textContent = c.lang; card.appendChild(lb); }
+      if (c.type) { var tb = document.createElement('span'); tb.className = 'badge'; tb.textContent = c.type; card.appendChild(tb); }
+      if (c.certainty === '불확실') { var ub = document.createElement('span'); ub.className = 'badge uncertain'; ub.textContent = '확실하지 않음'; card.appendChild(ub); }
+      var m = document.createElement('div'); m.className = 'mean'; m.textContent = c.meaning || ''; card.appendChild(m);
+      card.addEventListener('click', function () { openDetail(c); });
+      candidatesEl.appendChild(card);
+    });
+  }
+
+  // 기능2(작업 6): 고른 단어의 뜻·예문·유의어 상세를 중계 서버에서 조회해 렌더
+  async function openDetail(c) {
+    document.getElementById('detailWord').textContent = c.word || '';
+    document.getElementById('detailMean').textContent = '';
+    document.getElementById('detailExamples').innerHTML = '';
+    document.getElementById('detailSynonyms').innerHTML = '';
+    var ds = document.getElementById('detailStatus');
+    ds.textContent = '불러오는 중…'; ds.className = 'status';
+    show('screen-detail');
+    try {
+      var res = await fetchWithTimeout('/api/detail', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: c.word }),
+      });
+      var data = await res.json();
+      if (!res.ok) { ds.textContent = '오류: ' + (data.reason || ('HTTP ' + res.status)); ds.className = 'status error'; return; }
+      ds.textContent = '';
+      var mean = data.meaning || c.meaning || '';
+      document.getElementById('detailMean').textContent = mean ? ('뜻: ' + mean) : '';
+      var ex = document.getElementById('detailExamples');
+      (data.examples || []).forEach(function (e) { var p = document.createElement('p'); p.textContent = '예문: ' + e; ex.appendChild(p); });
+      var syn = document.getElementById('detailSynonyms');
+      if ((data.synonyms || []).length) { var p = document.createElement('p'); p.textContent = '유의어: ' + data.synonyms.join(', '); syn.appendChild(p); }
+    } catch (e) {
+      if (e.name === 'AbortError') ds.textContent = '응답이 너무 늦어요. 잠시 후 다시 눌러주세요.';
+      else ds.textContent = '인터넷 연결이 필요합니다. (' + e.message + ')';
+      ds.className = 'status error';
+    }
+  }
+</script>
